@@ -1,5 +1,9 @@
 # CiteMind
 
+<p align="center">
+  <img src="assets/Logo.png" alt="CiteMind">
+</p>
+
 **Local bibliography, webography, and academic knowledge manager for Windows.**
 
 CiteMind helps you collect, organize, read, and connect research sources in a local archive. It supports books, articles, theses, web resources, and PDFs, with assisted import, full-text search, relationship graphs, and bibliographic export.
