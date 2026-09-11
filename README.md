@@ -1,7 +1,7 @@
 # CiteMind
 
 <p align="center">
-  <img src="assets/Logo.png" alt="CiteMind">
+  <img src="Logo.png" alt="CiteMind">
 </p>
 
 **Local bibliography, webography, and academic knowledge manager for Windows.**
