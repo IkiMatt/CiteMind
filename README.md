@@ -1,51 +1,51 @@
 # CiteMind
 
-**Gestore locale di bibliografie, sitografie e conoscenza accademica per Windows.**
+**Local bibliography, webography, and academic knowledge manager for Windows.**
 
-CiteMind aiuta a raccogliere, organizzare, leggere e collegare le fonti di una ricerca in un archivio locale. Supporta libri, articoli, tesi, risorse web e PDF, con importazione assistita, ricerca full-text, grafi delle relazioni ed esportazione bibliografica.
+CiteMind helps you collect, organize, read, and connect research sources in a local archive. It supports books, articles, theses, web resources, and PDFs, with assisted import, full-text search, relationship graphs, and bibliographic export.
 
-## Funzionalita principali
+## Main features
 
-- archivi di progetto locali in formato SQLite (`.db`);
-- inserimento di bibliografia, sitografia e tesi;
-- importazione da PDF, BibTeX, RIS, CSV, DOI e URL;
-- recupero dei metadati tramite servizi bibliografici e revisione dei dati importati;
-- collegamento e lettura dei PDF associati alle fonti;
-- note, stato di lettura, annotazioni e organizzazione tematica;
-- ricerca full-text nell'archivio;
-- grafo della conoscenza e DAG delle citazioni/riferimenti;
-- generazione di note e sintesi locali tramite Ollama, quando configurato;
-- esportazione in DOCX, PDF, BibTeX e BibLaTeX;
-- stili citazionali personalizzabili;
-- interfaccia in piu lingue e tema chiaro/scuro.
+* local project archives in SQLite format (`.db`);
+* management of bibliographic references, web resources, and theses;
+* import from PDF, BibTeX, RIS, CSV, DOI, and URLs;
+* metadata retrieval through bibliographic services, with review and editing of imported data;
+* linking and reading PDFs associated with sources;
+* notes, reading status, annotations, and thematic organization;
+* full-text search across the archive;
+* knowledge graph and citation/reference DAG;
+* local note and summary generation via Ollama, when configured;
+* export to DOCX, PDF, BibTeX, and BibLaTeX;
+* customizable citation styles;
+* multilingual interface and light/dark themes.
 
-## Installazione su Windows
+## Installation on Windows
 
-1. Scarica `CiteMind_Setup.exe` dalla sezione **Releases** di GitHub.
-2. Avvia l'installer e segui la procedura guidata.
-3. Avvia CiteMind dal menu Start o dal collegamento creato dall'installer.
-4. Al primo avvio scegli **Nuovo progetto** per creare un archivio oppure **Apri progetto** per usare un file `.db` esistente.
+1. Download `CiteMind_Setup.exe` from the **Releases** section on GitHub.
+2. Run the installer and follow the setup wizard.
+3. Launch CiteMind from the Start menu or the shortcut created by the installer.
+4. On first launch, choose **New Project** to create an archive or **Open Project** to use an existing `.db` file.
 
-> Windows potrebbe mostrare un avviso per un'applicazione non ancora riconosciuta da SmartScreen. Verifica che il file provenga dalla release ufficiale di CiteMind prima di autorizzarne l'esecuzione.
+> Windows may display a warning for an application that is not yet recognized by SmartScreen. Make sure the file comes from the official CiteMind release before allowing it to run.
 
-### Dati e backup
+### Data and backups
 
-I dati del progetto sono contenuti nel file `.db` scelto dall'utente. Per eseguire un backup è sufficiente chiudere CiteMind e copiare il file in una posizione sicura. Se i PDF sono collegati tramite percorso, includi nel backup anche la cartella che li contiene.
+Project data is stored in the `.db` file selected by the user. To create a backup, simply close CiteMind and copy the file to a safe location. If PDFs are linked by file path, make sure to include the folder containing them in the backup as well.
 
-## Ollama e funzioni AI (opzionale)
+## Ollama and AI features (optional)
 
-Le funzioni di sintesi e analisi AI sono opzionali e usano Ollama in locale:
+AI-powered summarization and analysis are optional and use Ollama locally:
 
-1. Installa Ollama da [ollama.com/download](https://ollama.com/download).
-2. Scarica almeno un modello, ad esempio `ollama pull gemma4`.
-3. Avvia Ollama, se non è già attivo.
-4. Configura URL e modello nelle impostazioni AI di CiteMind.
+1. Install Ollama from [ollama.com/download](https://ollama.com/download).
+2. Download at least one model, for example `ollama pull gemma4`.
+3. Start Ollama if it is not already running.
+4. Configure the URL and model in CiteMind's AI settings.
 
-Senza Ollama CiteMind continua a funzionare per gestione, ricerca, importazione, lettura ed esportazione delle fonti.
+Without Ollama, CiteMind continues to work normally for source management, search, import, reading, and export.
 
-## Avvio da sorgente
+## Running from source
 
-Requisiti: Python 3.11 o superiore e le dipendenze elencate in `requirements.txt`.
+Requirements: Python 3.11 or later and the dependencies listed in `requirements.txt`.
 
 ```powershell
 python -m venv .venv
@@ -54,21 +54,22 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Per creare un eseguibile Windows con PyInstaller:
+To create a Windows executable with PyInstaller:
 
 ```powershell
 pip install pyinstaller
 pyinstaller main.spec
 ```
 
-L'installer distribuito agli utenti viene prodotto separatamente a partire dal build dell'applicazione.
+The installer distributed to users is built separately from the application build.
 
-## Documentazione
+## Documentation
 
-- [Manuale utente](docs/MANUALE.md)
-- [Licenza CiteMind](app/licenses/LICENSE_CiteMind.txt)
-- [Licenza Ollama](app/licenses/LICENSE_Ollama.txt)
+* [User Manual](docs/MANUALE.md)
+* [CiteMind License](app/licenses/LICENSE_CiteMind.txt)
+* [Ollama License](app/licenses/LICENSE_Ollama.txt)
 
-## Stato del progetto
+## Project status
 
-CiteMind è in sviluppo attivo. Prima di usare un archivio importante, mantieni una copia di backup del file `.db`.
+CiteMind is under active development. Before using an important archive, keep a backup copy of the `.db` file.
+
