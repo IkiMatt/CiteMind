@@ -67,11 +67,6 @@ pyinstaller main.spec
 
 The installer distributed to users is built separately from the application build.
 
-## Documentation
-
-* [User Manual](docs/MANUALE.md)
-* [CiteMind License](app/licenses/LICENSE_CiteMind.txt)
-* [Ollama License](app/licenses/LICENSE_Ollama.txt)
 
 ## Project status
 
