@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt, Signal, QStringListModel, QTimer, QSize
+from PySide6.QtGui import QColor, QPalette
 
 from app.theme import icon
 from app.i18n import LanguageManager
@@ -37,6 +38,8 @@ class EntryFormWidget(QWidget):
     bibliographyRequested = Signal(int)
     ocrRequested = Signal(int)
     referenceGraphRequested = Signal(int)
+    extractionExportRequested = Signal(int)
+    rAnalysisRequested = Signal(int)
     manualBibliographyEdited = Signal(int, list)
 
     def __init__(self, lang_mgr: LanguageManager, parent=None):
@@ -236,14 +239,44 @@ class EntryFormWidget(QWidget):
         self._btn_open_graph.setToolTip("Apre il DAG cronologico in una finestra esterna con scala temporale.")
         self._btn_open_graph.clicked.connect(self._on_open_graph_clicked)
         ref_header.addWidget(self._btn_open_graph)
+
+        self._btn_export_dataset = QPushButton(icon("file-export"), "")
+        self._btn_export_dataset.setFixedSize(34, 34)
+        self._btn_export_dataset.setToolTip("Esporta gli elementi estratti dal PDF in CSV o JSON")
+        self._btn_export_dataset.setAccessibleName("Esporta dataset PDF")
+        self._btn_export_dataset.clicked.connect(self._on_export_dataset_clicked)
+        self._btn_export_dataset.setEnabled(False)
+        ref_header.addWidget(self._btn_export_dataset)
+
+        self._btn_r_analysis = QPushButton(icon("chart-line"), "")
+        self._btn_r_analysis.setFixedSize(34, 34)
+        self._btn_r_analysis.setToolTip("Genera un grafico riepilogativo con R")
+        self._btn_r_analysis.setAccessibleName("Analisi R")
+        self._btn_r_analysis.clicked.connect(self._on_r_analysis_clicked)
+        self._btn_r_analysis.setEnabled(False)
+        ref_header.addWidget(self._btn_r_analysis)
         vl.addLayout(ref_header)
 
         self._ref_list_widget = QListWidget()
         self._ref_list_widget.setAlternatingRowColors(True)
         self._ref_list_widget.setStyleSheet("""
-            QListWidget { font-size: 12px; }
+            QListWidget {
+                font-size: 12px;
+                selection-background-color: #d8c7f2;
+                selection-color: #241338;
+            }
             QListWidget::item { padding: 4px 8px; }
+            QListWidget::item:selected,
+            QListWidget::item:selected:active,
+            QListWidget::item:selected:!active {
+                background: #d8c7f2;
+                color: #241338;
+            }
         """)
+        ref_palette = self._ref_list_widget.palette()
+        ref_palette.setColor(QPalette.Highlight, QColor("#d8c7f2"))
+        ref_palette.setColor(QPalette.HighlightedText, QColor("#241338"))
+        self._ref_list_widget.setPalette(ref_palette)
         vl.addWidget(self._ref_list_widget, 1)
         
         return w
@@ -252,6 +285,14 @@ class EntryFormWidget(QWidget):
         """Emette segnale per aprire il dialog esterno del grafo."""
         if self._current_id is not None:
             self.referenceGraphRequested.emit(self._current_id)
+
+    def _on_export_dataset_clicked(self):
+        if self._current_id is not None:
+            self.extractionExportRequested.emit(self._current_id)
+
+    def _on_r_analysis_clicked(self):
+        if self._current_id is not None:
+            self.rAnalysisRequested.emit(self._current_id)
 
     def _on_refresh_bibliography_clicked(self):
         if self._current_id is not None:
@@ -280,39 +321,45 @@ class EntryFormWidget(QWidget):
         vl.setContentsMargins(16, 16, 16, 16)
         vl.setSpacing(16)
 
-        # ── AI Topics ────────────────────────────────────────────────────
+        # ── Tags ─────────────────────────────────────────────────────────
         lbl_topics = QLabel(f"🏷️  {self._lang.tr('analysis_ai_topics_title')}")
         lbl_topics.setStyleSheet("font-weight: 700; font-size: 14px;")
         vl.addWidget(lbl_topics)
 
         reset_row = QHBoxLayout()
         reset_row.setSpacing(6)
-        self._btn_generate_topics = QPushButton("Edit keywords")
+        self._btn_generate_topics = QPushButton(self._lang.tr("analysis_tags_edit"))
         self._btn_generate_topics.clicked.connect(self._emit_generate_semantic_keywords)
         self._btn_generate_topics.setEnabled(False)
         reset_row.addWidget(self._btn_generate_topics)
 
-        self._btn_reset_entry_topics = QPushButton("Reset this article")
+        self._btn_reset_entry_topics = QPushButton(self._lang.tr("analysis_tags_reset_entry"))
         self._btn_reset_entry_topics.clicked.connect(self._emit_reset_entry_topics)
         self._btn_reset_entry_topics.setEnabled(False)
         reset_row.addWidget(self._btn_reset_entry_topics)
 
-        self._btn_reset_all_topics = QPushButton("Reset all AI topics")
+        self._btn_reset_all_topics = QPushButton(self._lang.tr("analysis_tags_reset_all"))
         self._btn_reset_all_topics.clicked.connect(self._emit_reset_all_topics)
         reset_row.addWidget(self._btn_reset_all_topics)
         reset_row.addStretch()
         vl.addLayout(reset_row)
 
         self._topics_editor = QLineEdit()
-        self._topics_editor.setPlaceholderText("Edit keywords manually (comma separated)")
+        self._topics_editor.setPlaceholderText(self._lang.tr("analysis_tags_placeholder"))
         self._topics_editor.setEnabled(False)
         self._topics_editor.setClearButtonEnabled(True)
         self._topics_editor.editingFinished.connect(self._emit_topics_edited)
         self._topics_editor.returnPressed.connect(self._emit_topics_edited)
+        self._topics_editor.textEdited.connect(self._update_topic_completion)
         self._topics_completer = QCompleter([])
+        self._topic_completion_base = ""
+        self._pending_topic_completion = ""
         self._topics_completer.setCaseSensitivity(Qt.CaseInsensitive)
         self._topics_completer.setCompletionMode(QCompleter.PopupCompletion)
         self._topics_completer.setFilterMode(Qt.MatchContains)
+        self._topics_completer.activated.connect(
+            self._on_topic_completion_activated
+        )
         self._topics_editor.setCompleter(self._topics_completer)
         vl.addWidget(self._topics_editor)
 
@@ -640,6 +687,42 @@ class EntryFormWidget(QWidget):
                 keywords.append(value)
         self.topicsEdited.emit(self._current_id, keywords)
 
+    def _update_topic_completion(self, text: str):
+        """Complete only the topic currently being typed after the last comma."""
+        if not self._topics_editor.isEnabled():
+            return
+        current = text.rsplit(",", 1)[-1].strip()
+        self._topic_completion_base = text.rsplit(",", 1)[0].strip()
+        self._topics_completer.setCompletionPrefix(current)
+        if current:
+            QTimer.singleShot(0, lambda prefix=current: self._show_topic_completion(prefix))
+        else:
+            self._topics_completer.popup().hide()
+
+    def _show_topic_completion(self, prefix: str):
+        """Open completion for the text after the last comma."""
+        current = self._topics_editor.text().rsplit(",", 1)[-1].strip()
+        if current != prefix or not self._topics_editor.hasFocus():
+            return
+        self._topics_completer.setCompletionPrefix(prefix)
+        self._topics_completer.complete(self._topics_editor.rect())
+
+    def _on_topic_completion_activated(self, completion: str):
+        """Keep earlier tags when replacing only the current completion segment."""
+        self._pending_topic_completion = completion
+        QTimer.singleShot(0, self._apply_topic_completion)
+
+    def _apply_topic_completion(self):
+        """Apply the selected completion after QLineEdit's default insertion."""
+        completion = self._pending_topic_completion
+        self._pending_topic_completion = ""
+        base = self._topic_completion_base
+        value = completion.strip()
+        combined = f"{base}, {value}" if base and value else (base or value)
+        self._topics_editor.setText(combined)
+        self._topics_editor.setCursorPosition(len(combined))
+        QTimer.singleShot(0, self._emit_topics_edited)
+
     def _emit_reset_entry_topics(self):
         if self._current_id is not None:
             self.resetAiTopicsRequested.emit(self._current_id)
@@ -683,6 +766,8 @@ class EntryFormWidget(QWidget):
         has_pdf = bool(data.get("pdf_path", "").strip())
         self._btn_refresh_bibliography.setEnabled(self._current_id is not None and has_pdf)
         self._btn_ocr_pdf.setEnabled(self._current_id is not None and has_pdf)
+        self._btn_export_dataset.setEnabled(self._current_id is not None and has_pdf)
+        self._btn_r_analysis.setEnabled(self._current_id is not None and has_pdf)
         for key, widget in self._fields.items():
             val = data.get(key, "")
             if isinstance(widget, QTextEdit):
@@ -747,6 +832,15 @@ class EntryFormWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
                 
+        self._render_topic_badges(topics)
+
+    def _render_topic_badges(self, topics: list):
+        """Refresh the visible topic badges without reloading the whole entry."""
+        while self._topics_layout.count():
+            item = self._topics_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
         if topics and isinstance(topics, list) and len(topics) > 0:
             self._topics_empty_lbl.setVisible(False)
             self._topics_container.setVisible(True)
@@ -770,6 +864,12 @@ class EntryFormWidget(QWidget):
             self._topics_empty_lbl.setVisible(True)
             self._topics_container.setVisible(False)
             self._topics_editor.setText("")
+
+    def set_topics(self, topics: list[str]):
+        """Update the manual topic editor and badges after a save."""
+        cleaned = [str(topic).strip() for topic in topics if str(topic).strip()]
+        self._render_topic_badges(cleaned)
+        self._topics_editor.setText(", ".join(cleaned))
             
         # Invece di estratto biblio grezzo, carichiamo i riferimenti
         # Questo sarà popolato dal controller principale (MainWindow) che chiederà

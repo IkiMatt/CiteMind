@@ -40,6 +40,7 @@ from app.widgets.pdf_viewer import PdfViewerWidget
 from app.services.import_pipeline import ImportPipeline, DropItem, DropType
 from app.services.learning import ImportLearningSystem
 from app.workers.import_worker import ImportWorker
+from app.services.update_service import UpdateService, UpdateWorker, ReleaseInfo
 
 
 class MainWindowView(QMainWindow):
@@ -57,6 +58,8 @@ class MainWindowView(QMainWindow):
         self._local_dag_dialog = None
         self._local_dag_widget = None
         self._import_worker: ImportWorker | None = None
+        self._update_worker: UpdateWorker | None = None
+        self._pending_release: ReleaseInfo | None = None
         self._learning = ImportLearningSystem(adapter._model)
 
         self._adapter.entriesChanged.connect(self._refresh_list)
@@ -84,6 +87,7 @@ class MainWindowView(QMainWindow):
         self._update_window_title()
         self._refresh_list()
         self._on_stats(adapter.get_stats())
+        QTimer.singleShot(1500, lambda: self._check_for_updates(silent=True))
 
     # ── build ──────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -157,6 +161,11 @@ class MainWindowView(QMainWindow):
         self._act_topic_dictionary = QAction(icon("book"), self._lang.tr("act_topic_dictionary"), self)
         self._act_topic_dictionary.triggered.connect(self._show_topic_dictionary)
         tools_menu.addAction(self._act_topic_dictionary)
+
+        self._act_check_updates = QAction(icon("refresh-alert"), self._lang.tr("act_check_updates"), self)
+        self._act_check_updates.setToolTip(self._lang.tr("act_check_updates_tip"))
+        self._act_check_updates.triggered.connect(lambda: self._check_for_updates(silent=False))
+        tools_menu.addAction(self._act_check_updates)
 
         # ── Licenze Menu ─────────────────────────────────────────────────────
         licenze_menu = menu_bar.addMenu(self._lang.tr('menu_licenze'))
@@ -273,6 +282,8 @@ class MainWindowView(QMainWindow):
         self._form.bibliographyRequested.connect(self._on_bibliography_requested)
         self._form.ocrRequested.connect(self._on_ocr_requested)
         self._form.referenceGraphRequested.connect(self._on_reference_graph_requested)
+        self._form.extractionExportRequested.connect(self._on_extraction_export_requested)
+        self._form.rAnalysisRequested.connect(self._on_r_analysis_requested)
         self._form.manualBibliographyEdited.connect(self._on_manual_bibliography_edited)
         form_layout.addWidget(self._form, 1)
 
@@ -289,6 +300,50 @@ class MainWindowView(QMainWindow):
 
         # ── Status bar ────────────────────────────────────────────────────
         self._status_mgr = StatusBarManager(self, self._lang, self._theme)
+
+    def _check_for_updates(self, silent: bool = False):
+        if self._update_worker and self._update_worker.isRunning():
+            return
+        self._act_check_updates.setEnabled(False)
+        self._update_worker = UpdateWorker(parent=self)
+        self._update_worker.found.connect(lambda release: self._on_update_found(release, silent))
+        self._update_worker.failed.connect(lambda error: self._on_update_failed(error, silent))
+        self._update_worker.finished.connect(lambda: self._act_check_updates.setEnabled(True))
+        self._update_worker.start()
+
+    def _on_update_found(self, release: ReleaseInfo | None, silent: bool):
+        if release is None:
+            if not silent:
+                QMessageBox.information(self, self._lang.tr("update_title"), self._lang.tr("update_none"))
+            return
+        self._pending_release = release
+        answer = QMessageBox.question(
+            self,
+            self._lang.tr("update_title"),
+            self._lang.tr("update_available").format(version=release.version),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer == QMessageBox.Yes:
+            self._download_update(release)
+
+    def _download_update(self, release: ReleaseInfo):
+        self._act_check_updates.setEnabled(False)
+        self._update_worker = UpdateWorker(release, self)
+        self._update_worker.progress.connect(lambda value: self.statusBar().showMessage(f"{self._lang.tr('update_downloading')} {value}%"))
+        self._update_worker.downloaded.connect(self._on_update_downloaded)
+        self._update_worker.failed.connect(lambda error: self._on_update_failed(error, False))
+        self._update_worker.finished.connect(lambda: self._act_check_updates.setEnabled(True))
+        self._update_worker.start()
+
+    def _on_update_downloaded(self, installer_path: str):
+        QMessageBox.information(self, self._lang.tr("update_title"), self._lang.tr("update_ready"))
+        UpdateService.install_after_exit(Path(installer_path))
+        self.close()
+
+    def _on_update_failed(self, error: str, silent: bool):
+        if not silent:
+            QMessageBox.warning(self, self._lang.tr("update_error_title"), self._lang.tr("update_error").format(error=error))
 
     # ── window title & DB label ────────────────────────────────────────────
     def _update_window_title(self):
@@ -418,7 +473,7 @@ class MainWindowView(QMainWindow):
     def _build_reference_graph_dock(self):
         """Create the reference graph dock widget (hidden by default)."""
         from app.dialogs.reference_graph_dialog import ReferenceGraphWidget
-        self._ref_graph_widget = ReferenceGraphWidget(self)
+        self._ref_graph_widget = ReferenceGraphWidget(self._lang, self)
         self._ref_graph_dock = QDockWidget(self._lang.tr("view_global_dag"), self)
         self._ref_graph_dock.setWidget(self._ref_graph_widget)
         self._ref_graph_dock.setFeatures(
@@ -771,6 +826,63 @@ class MainWindowView(QMainWindow):
     def _open_pdf_manager(self):
         PdfManagerDialog(self._adapter, self._lang, self).exec()
 
+    def _on_extraction_export_requested(self, entry_id: int):
+        """Export extracted PDF items for the selected entry."""
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Esporta dataset PDF",
+            str(Path.home() / "citemind_extraction.csv"),
+            "CSV (*.csv);;JSON (*.json)",
+        )
+        if not path:
+            return
+
+        include_pending = QMessageBox.question(
+            self,
+            "Elementi da verificare",
+            "Includere anche immagini, tabelle o metadati ancora da verificare?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) == QMessageBox.Yes
+
+        try:
+            from app.services.extraction_export import export_extracted_items
+            file_format = "json" if path.lower().endswith(".json") else "csv"
+            count = export_extracted_items(
+                self._adapter._model,
+                entry_id,
+                path,
+                file_format=file_format,
+                include_pending=include_pending,
+            )
+            QMessageBox.information(
+                self,
+                "Esportazione completata",
+                f"Esportati {count} elementi in:\n{path}",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Esportazione fallita", str(exc))
+
+    def _on_r_analysis_requested(self, entry_id: int):
+        """Run the optional R summary for confirmed extracted items."""
+        entry = self._adapter._model.read_by_id(entry_id)
+        pdf_path = (entry or {}).get("pdf_path", "").strip()
+        if not pdf_path:
+            QMessageBox.warning(self, "Analisi R", "L'entry non dispone di un PDF associato.")
+            return
+
+        from app.services.r_analysis import run_r_summary
+        output_dir = Path(pdf_path).parent / ".citemind" / Path(pdf_path).stem / "r_analysis"
+        try:
+            result = run_r_summary(self._adapter._model, entry_id, output_dir)
+            QMessageBox.information(
+                self,
+                "Analisi R completata",
+                f"Grafico creato con {result['rows']} elementi confermati:\n{result['chart_path']}",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Analisi R non disponibile", str(exc))
+
 
     def _unlink_pdf_row(self, entry_id: int):
         ret = QMessageBox.question(
@@ -967,12 +1079,27 @@ class MainWindowView(QMainWindow):
         QMessageBox.warning(self, "OCR", message)
 
     def _on_reference_extraction_finished(self, entry_id: int, match_ids: list[int]):
-        self._form.set_reference_processing(False, f"Estrazione completata. Trovati {len(match_ids)} match.")
-        
-        # Uniamo con i riferimenti già presenti?
+        self._form.set_reference_processing(
+            False,
+            f"Estrazione completata. Proposte {len(match_ids)} corrispondenze.",
+        )
+        if not match_ids:
+            self._refresh_reference_graph(entry_id)
+            return
+
+        all_entries = self._adapter._model.read_all_full()
+        by_id = {int(entry["id"]): entry for entry in all_entries}
+        candidates = [by_id[match_id] for match_id in match_ids if match_id in by_id]
+
+        from app.dialogs.reference_review_dialog import ReferenceReviewDialog
+        dialog = ReferenceReviewDialog(candidates, self)
+        if dialog.exec() != ReferenceReviewDialog.Accepted:
+            self._form.set_reference_processing(False, "Corrispondenze non confermate.")
+            return
+
+        confirmed_ids = dialog.selected_ids()
         current_linked = self._adapter._model.get_linked_references(entry_id)
-        new_linked = list(set(current_linked + match_ids))
-        
+        new_linked = list(dict.fromkeys(current_linked + confirmed_ids))
         self._adapter._model.save_linked_references(entry_id, new_linked)
         self._refresh_reference_graph(entry_id)
 
@@ -1036,7 +1163,7 @@ class MainWindowView(QMainWindow):
         dlg.resize(1100, 750)
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(0, 0, 0, 0)
-        widget = ReferenceGraphWidget(dlg)
+        widget = ReferenceGraphWidget(self._lang, dlg)
         lay.addWidget(widget)
         widget.load_graph(graph_json)
         self._local_dag_dialog = dlg
@@ -1081,6 +1208,7 @@ class MainWindowView(QMainWindow):
                 seen.add(value.casefold())
                 cleaned.append(value)
         self._adapter._model.save_ai_topics(entry_id, cleaned)
+        self._form.set_topics(cleaned)
         self._adapter.entriesChanged.emit()
         self._refresh_list()
 
