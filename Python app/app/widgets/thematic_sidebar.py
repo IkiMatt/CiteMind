@@ -299,9 +299,13 @@ class ThematicSidebarWidget(QWidget):
 
         item.setText(0, display)
 
-        # Color by entry type
-        et = entry.get("entry_type", "bibliography")
-        color = self._theme_colors.get(et, "#a0a0c0")
+        # Prefer the specific publication subtype, then fall back to the category.
+        pub_type = (entry.get("pub_type") or "").strip().lower()
+        entry_type = (entry.get("entry_type") or "bibliography").strip().lower()
+        color = self._theme_colors.get(
+            pub_type,
+            self._theme_colors.get(entry_type, "#a0a0c0"),
+        )
         item.setForeground(0, QBrush(QColor(color)))
 
         # Tooltip
