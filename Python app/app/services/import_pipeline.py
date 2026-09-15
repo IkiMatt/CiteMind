@@ -21,6 +21,7 @@ from app.services.metadata_enrichment import MetadataEnricher
 from app.services.bibtex_parser import BibtexParser
 from app.services.ris_parser import RisParser
 from app.services.csv_parser import CsvParser
+from app.services.pdf_service import extract_embedded_images, extract_tables
 
 
 class DropType(Enum):
@@ -47,6 +48,7 @@ class ImportResult:
     entry_ids: list[int] = field(default_factory=list)  # for multi-entry imports (BibTeX)
     metadata: dict = field(default_factory=dict)
     confidence: dict[str, float] = field(default_factory=dict)
+    source_map: dict[str, str] = field(default_factory=dict)
     source: str = ""        # primary source: "crossref", "openalex", "ollama", "pdf_parse"
     warnings: list[str] = field(default_factory=list)
     needs_review: bool = False
@@ -143,9 +145,10 @@ class ImportPipeline:
         ctx.doi = pdf_meta.doi
         ctx.abstract = pdf_meta.abstract
         ctx.keywords = pdf_meta.keywords
+        ctx.source_map.update(pdf_meta.field_sources)
 
         for k, v in ctx.confidence.items():
-            ctx.source_map[k] = "pdf_parse"
+            ctx.source_map.setdefault(k, "pdf_parse")
 
         # Stage 2: API enrichment (if DOI or title found)
         self._enrich(ctx)
@@ -474,6 +477,65 @@ class ImportPipeline:
 
         ctx.entry_id = self._model.create(entry_data)
 
+        # Preserve the origin of each imported value for later review.
+        if ctx.entry_id and ctx.item.type == DropType.PDF:
+            provenance = dict(ctx.metadata)
+            if ctx.abstract:
+                provenance["abstract"] = ctx.abstract
+            for field_name, value in provenance.items():
+                if value in (None, "", []):
+                    continue
+                source = ctx.source_map.get(field_name, "pdf_parse")
+                page = 1 if source == "pdf_first_page" else 0
+                confidence = ctx.confidence.get(field_name, 0.0)
+                self._model.save_pdf_extracted_item(
+                    ctx.entry_id,
+                    "metadata",
+                    content_text=str(value),
+                    page=page,
+                    source=source,
+                    confidence=confidence,
+                    metadata_json=json.dumps({"field": field_name}, ensure_ascii=True),
+                )
+
+            try:
+                image_dir = Path(ctx.pdf_path).parent / ".citemind" / Path(ctx.pdf_path).stem / "images"
+                for image in extract_embedded_images(ctx.pdf_path, image_dir):
+                    self._model.save_pdf_extracted_item(
+                        ctx.entry_id,
+                        "image",
+                        file_path=image["file_path"],
+                        page=image["page"],
+                        source="pdf_embedded",
+                        confidence=1.0,
+                        review_status="confirmed",
+                        metadata_json=json.dumps(
+                            {key: image[key] for key in ("xref", "width", "height", "extension")},
+                            ensure_ascii=True,
+                        ),
+                    )
+            except Exception as exc:
+                ctx.warnings.append(f"Image extraction failed: {exc}")
+
+            try:
+                table_dir = Path(ctx.pdf_path).parent / ".citemind" / Path(ctx.pdf_path).stem / "tables"
+                for table in extract_tables(ctx.pdf_path, table_dir):
+                    self._model.save_pdf_extracted_item(
+                        ctx.entry_id,
+                        "table",
+                        file_path=table["file_path"],
+                        page=table["page"],
+                        source="pdf_table",
+                        confidence=0.7,
+                        review_status="pending",
+                        metadata_json=json.dumps(
+                            {key: table[key] for key in ("rows", "columns")},
+                            ensure_ascii=True,
+                        ),
+                    )
+            except Exception as exc:
+                ctx.warnings.append(f"Table extraction failed: {exc}")
+
         # Save keywords as AI topics if available
         if ctx.keywords and ctx.entry_id:
             self._model.save_ai_topics(ctx.entry_id, ctx.keywords)
@@ -506,6 +568,7 @@ class ImportPipeline:
             entry_ids=[ctx.entry_id] if ctx.entry_id else [],
             metadata=ctx.metadata,
             confidence=ctx.confidence,
+            source_map=ctx.source_map,
             source=self._primary_source(ctx.source_map),
             warnings=ctx.warnings,
             needs_review=needs_review,

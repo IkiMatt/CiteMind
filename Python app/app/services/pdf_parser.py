@@ -1,6 +1,6 @@
 import fitz  # PyMuPDF
 import re
-from typing import List, Dict, Any
+from typing import List
 from dataclasses import dataclass, field
 
 @dataclass
@@ -12,27 +12,129 @@ class PdfMetadata:
     abstract: str = ""
     keywords: list[str] = field(default_factory=list)
     confidence: dict[str, float] = field(default_factory=dict)
+    field_sources: dict[str, str] = field(default_factory=dict)
 
 class PdfMetadataExtractor:
-    """Extracts basic metadata from PDF file properties."""
+    """Extract metadata from PDF properties and the first page."""
+
+    _DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
+    _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
     def extract(self, pdf_path: str) -> PdfMetadata:
         meta = PdfMetadata()
         try:
-            doc = fitz.open(pdf_path)
-            info = doc.metadata
-            if info:
-                meta.title = info.get("title", "")
-                meta.authors = info.get("author", "")
-                
-                # very basic confidence
+            with fitz.open(pdf_path) as doc:
+                info = doc.metadata or {}
+                meta.title = (info.get("title") or "").strip()
+                meta.authors = (info.get("author") or "").strip()
                 if meta.title:
                     meta.confidence["title"] = 0.5
+                    meta.field_sources["title"] = "pdf_metadata"
                 if meta.authors:
                     meta.confidence["authors"] = 0.5
-            doc.close()
+                    meta.field_sources["authors"] = "pdf_metadata"
+
+                if len(doc):
+                    self._extract_first_page(doc[0], meta)
         except Exception:
             pass
         return meta
+
+    def _extract_first_page(self, page: fitz.Page, meta: PdfMetadata) -> None:
+        """Fill only missing fields using visible first-page text."""
+        page_text = page.get_text("text", sort=True)
+        lines = [line.strip() for line in page_text.splitlines() if line.strip()]
+        if not lines:
+            return
+
+        if not meta.title:
+            title = self._first_page_title(page)
+            if title:
+                meta.title = title
+                meta.confidence["title"] = 0.65
+                meta.field_sources["title"] = "pdf_first_page"
+
+        if not meta.authors:
+            author_line = self._author_line(lines, meta.title)
+            if author_line:
+                meta.authors = author_line
+                meta.confidence["authors"] = 0.55
+                meta.field_sources["authors"] = "pdf_first_page"
+
+        if not meta.year:
+            year_match = self._YEAR_RE.search(page_text[:3000])
+            if year_match:
+                meta.year = year_match.group(0)
+                meta.confidence["year"] = 0.45
+                meta.field_sources["year"] = "pdf_first_page"
+
+        if not meta.doi:
+            doi_match = self._DOI_RE.search(page_text[:5000])
+            if doi_match:
+                meta.doi = doi_match.group(0).rstrip(".,;)")
+                meta.confidence["doi"] = 0.75
+                meta.field_sources["doi"] = "pdf_first_page"
+
+        abstract = self._labeled_section(lines, ("abstract", "摘要", "riassunto"))
+        if abstract and not meta.abstract:
+            meta.abstract = abstract[:4000]
+            meta.confidence["abstract"] = 0.7
+            meta.field_sources["abstract"] = "pdf_first_page"
+
+        keywords = self._keywords(lines)
+        if keywords and not meta.keywords:
+            meta.keywords = keywords[:20]
+            meta.confidence["keywords"] = 0.7
+            meta.field_sources["keywords"] = "pdf_first_page"
+
+    @staticmethod
+    def _first_page_title(page: fitz.Page) -> str:
+        """Select the largest meaningful text line near the top of the page."""
+        candidates: list[tuple[float, str]] = []
+        for block in page.get_text("dict", sort=True).get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                text = " ".join(span.get("text", "").strip() for span in line.get("spans", []))
+                text = re.sub(r"\s+", " ", text).strip()
+                if 15 <= len(text) <= 240 and "@" not in text:
+                    size = max((float(span.get("size", 0)) for span in line.get("spans", [])), default=0)
+                    candidates.append((size, text))
+        return max(candidates, key=lambda candidate: candidate[0])[1] if candidates else ""
+
+    @staticmethod
+    def _author_line(lines: list[str], title: str) -> str:
+        """Find a short author-like line close to the title."""
+        title_index = lines.index(title) if title in lines else 0
+        for line in lines[title_index + 1:title_index + 6]:
+            lower = line.lower()
+            if len(line) > 200 or "@" in line or lower.startswith(("abstract", "keywords", "introduction")):
+                continue
+            if "," in line or " and " in lower or " et al" in lower:
+                return line
+        return ""
+
+    @staticmethod
+    def _labeled_section(lines: list[str], labels: tuple[str, ...]) -> str:
+        for index, line in enumerate(lines):
+            if line.lower().rstrip(":").strip() in labels:
+                section: list[str] = []
+                for candidate in lines[index + 1:]:
+                    if candidate.lower().rstrip(":").strip() in ("keywords", "key words", "introduction"):
+                        break
+                    section.append(candidate)
+                return " ".join(section).strip()
+        return ""
+
+    @staticmethod
+    def _keywords(lines: list[str]) -> list[str]:
+        for line in lines:
+            if ":" not in line:
+                continue
+            label, values = line.split(":", 1)
+            if label.lower().strip() in ("keywords", "key words", "parole chiave"):
+                return [value.strip(" .;") for value in re.split(r"[,;]", values) if value.strip()]
+        return []
 
 TRIGGER_WORDS = [
     "bibliografia", "bibliography", "references", "works cited", 
