@@ -13,8 +13,6 @@ import PySide6.QtSvg  # noqa: F401 — ensures SVG rendering plugin is loaded
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QSettings
 
-import resources_rc  # noqa: F401 — compiled Qt resources (icons)
-
 from app.theme import ThemeManager
 from app.citation_engine import CitationStyleEngine
 from app.model import EntryModel
