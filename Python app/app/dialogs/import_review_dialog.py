@@ -129,7 +129,7 @@ class ImportReviewDialog(QDialog):
         for field_key, label_text in self.REVIEW_FIELDS:
             value = str(self._result.metadata.get(field_key, ""))
             conf = self._result.confidence.get(field_key, 0.0)
-            source = ""  # Could get from source_map if available
+            source = self._result.source_map.get(field_key, "")
 
             # Row: [confidence badge] [label] [line edit]
             row = QHBoxLayout()

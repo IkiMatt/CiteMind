@@ -32,9 +32,10 @@ _TOPIC_COLORS = [
 class ReferenceGraphWidget(QWidget):
     """Widget per il DAG cronologico delle referenze."""
 
-    def __init__(self, parent=None):
+    def __init__(self, lang_mgr=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grafico Cronologico Referenze")
+        self._lang = lang_mgr
+        self.setWindowTitle(self._tr("reference_graph_title", "Bibliographic Timeline Graph"))
         self.setMinimumSize(250, 250)
 
         self._topic_color_map: dict[str, str] = {}
@@ -48,8 +49,9 @@ class ReferenceGraphWidget(QWidget):
 
         # ── Header ──────────────────────────────────────────────────────
         header = QHBoxLayout()
-        title = QLabel("📊 DAG Cronologico — Referenze Bibliografiche")
+        title = QLabel()
         title.setStyleSheet("font-weight: 700; font-size: 14px;")
+        self._title_label = title
         header.addWidget(title)
         header.addStretch()
 
@@ -63,10 +65,9 @@ class ReferenceGraphWidget(QWidget):
         toolbar.setSpacing(8)
 
         # Topic color filter
-        toolbar.addWidget(QLabel("Colore per:"))
+        self._color_label = QLabel()
+        toolbar.addWidget(self._color_label)
         self._color_combo = QComboBox()
-        self._color_combo.addItem("Tipo nodo (default)")
-        self._color_combo.addItem("AI Topic")
         self._color_combo.currentIndexChanged.connect(self._on_color_mode_changed)
         toolbar.addWidget(self._color_combo)
 
@@ -77,7 +78,7 @@ class ReferenceGraphWidget(QWidget):
         btn_toggle_labels.setIcon(icon("tag"))
         btn_toggle_labels.setIconSize(QSize(18, 18))
         btn_toggle_labels.setFixedSize(28, 28)
-        btn_toggle_labels.setToolTip("Mostra o nasconde le etichette di testo dei nodi nel grafico.")
+        self._btn_toggle_labels = btn_toggle_labels
         btn_toggle_labels.clicked.connect(self._toggle_labels_visibility)
         toolbar.addWidget(btn_toggle_labels)
 
@@ -86,7 +87,7 @@ class ReferenceGraphWidget(QWidget):
         btn_zoom_in.setIcon(icon("zoom-in"))
         btn_zoom_in.setIconSize(QSize(18, 18))
         btn_zoom_in.setFixedSize(28, 28)
-        btn_zoom_in.setToolTip("Zoom In")
+        btn_zoom_in.setToolTip(self._tr("reference_graph_zoom_in", "Zoom in"))
         btn_zoom_in.clicked.connect(lambda: self._canvas.zoom_step(1.3))
         toolbar.addWidget(btn_zoom_in)
 
@@ -94,7 +95,7 @@ class ReferenceGraphWidget(QWidget):
         btn_zoom_out.setIcon(icon("zoom-out"))
         btn_zoom_out.setIconSize(QSize(18, 18))
         btn_zoom_out.setFixedSize(28, 28)
-        btn_zoom_out.setToolTip("Zoom Out")
+        btn_zoom_out.setToolTip(self._tr("reference_graph_zoom_out", "Zoom out"))
         btn_zoom_out.clicked.connect(lambda: self._canvas.zoom_step(0.7))
         toolbar.addWidget(btn_zoom_out)
 
@@ -102,7 +103,7 @@ class ReferenceGraphWidget(QWidget):
         btn_fit.setIcon(icon("arrows-maximize"))
         btn_fit.setIconSize(QSize(18, 18))
         btn_fit.setFixedSize(28, 28)
-        btn_fit.setToolTip("Adatta alla vista")
+        btn_fit.setToolTip(self._tr("reference_graph_fit", "Fit to view"))
         btn_fit.clicked.connect(lambda: self._canvas.fit_in_view())
         toolbar.addWidget(btn_fit)
 
@@ -111,7 +112,7 @@ class ReferenceGraphWidget(QWidget):
         btn_export.setIcon(icon("download"))
         btn_export.setIconSize(QSize(18, 18))
         btn_export.setFixedSize(28, 28)
-        btn_export.setToolTip("Salva il grafico come immagine PNG ad alta risoluzione.")
+        btn_export.setToolTip(self._tr("reference_graph_export_tip", "Save the graph as a high-resolution PNG image."))
         btn_export.clicked.connect(self._export_png)
         toolbar.addWidget(btn_export)
 
@@ -127,6 +128,27 @@ class ReferenceGraphWidget(QWidget):
         root.addWidget(self._canvas, 1)
 
         self._year_labels: list = []
+        self._refresh_translations()
+
+        if self._lang is not None:
+            self._lang.languageChanged.connect(self._refresh_translations)
+
+    def _tr(self, key: str, fallback: str) -> str:
+        return self._lang.tr(key, fallback) if self._lang is not None else fallback
+
+    def _refresh_translations(self, *_args):
+        self.setWindowTitle(self._tr("reference_graph_title", "Bibliographic Timeline Graph"))
+        self._title_label.setText(self._tr("reference_graph_header", "Bibliographic Timeline DAG"))
+        self._color_label.setText(self._tr("reference_graph_color_by", "Color by:"))
+        current_index = self._color_combo.currentIndex()
+        self._color_combo.blockSignals(True)
+        self._color_combo.clear()
+        self._color_combo.addItem(self._tr("reference_graph_color_type", "Node type (default)"))
+        self._color_combo.addItem(self._tr("reference_graph_color_topic", "AI topic"))
+        self._color_combo.setCurrentIndex(max(0, current_index))
+        self._color_combo.blockSignals(False)
+        self._btn_toggle_labels.setToolTip(self._tr("reference_graph_toggle_labels", "Show or hide node text labels."))
+        self._update_legend_topics() if self._color_mode_index == 1 else self._update_legend_default()
 
     # ── Public API ────────────────────────────────────────────────────────
     def load_graph(self, graph_json: dict):
@@ -150,7 +172,7 @@ class ReferenceGraphWidget(QWidget):
         # Conta nodi
         n_nodes = len(graph_json.get("nodes", []))
         n_edges = len(graph_json.get("edges", []))
-        self._info_label.setText(f"{n_nodes} nodi · {n_edges} archi")
+        self._info_label.setText(self._tr("reference_graph_info", "{nodes} nodes · {edges} edges").format(nodes=n_nodes, edges=n_edges))
 
         # Draw time axis
         self._draw_time_axis()
@@ -230,9 +252,9 @@ class ReferenceGraphWidget(QWidget):
         """Show default legend (node types)."""
         self._clear_legend()
         for color, text in [
-            ("#e74c3c", "● Documento corrente"),
-            ("#3498db", "● Referenza nel DB"),
-            ("#7c3aed", "● Doc. generico"),
+            ("#e74c3c", self._tr("reference_graph_current", "Current document")),
+            ("#3498db", self._tr("reference_graph_db_reference", "Reference in database")),
+            ("#7c3aed", self._tr("reference_graph_generic", "Generic document")),
         ]:
             lbl = QLabel(f'<span style="color:{color}; font-size:14px;">●</span> {text}')
             lbl.setStyleSheet("font-size: 11px;")
@@ -249,7 +271,7 @@ class ReferenceGraphWidget(QWidget):
             self._legend_layout.addWidget(lbl)
 
         # "Senza topic" in grey
-        lbl = QLabel('<span style="color:#777788; font-size:14px;">●</span> Senza topic')
+        lbl = QLabel(f'<span style="color:#777788; font-size:14px;">●</span> {self._tr("reference_graph_no_topic", "No topic")}')
         lbl.setStyleSheet("font-size: 11px;")
         self._legend_layout.addWidget(lbl)
         self._legend_layout.addStretch()
@@ -264,8 +286,10 @@ class ReferenceGraphWidget(QWidget):
     def _export_png(self):
         """Export the current graph view as a high-resolution PNG."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Salva Grafico", str(Path.home() / "dag_bibliografico.png"),
-            "Immagini PNG (*.png);;Tutti i file (*)",
+            self,
+            self._tr("reference_graph_save_title", "Save graph"),
+            str(Path.home() / "dag_bibliografico.png"),
+            self._tr("reference_graph_png_filter", "PNG images (*.png);;All files (*)"),
         )
         if not path:
             return
